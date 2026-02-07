@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Your Email</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background-color: #1E6FFF; padding: 30px; text-align: center;">
+                            <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{ business_name }}</h1>
+                        </td>
+                    </tr>
+                    
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 40px 30px;">
+                            <h2 style="color: #333333; margin: 0 0 20px 0; font-size: 22px;">Verify Your Email Address</h2>
+                            
+                            <p style="color: #666666; line-height: 1.6; margin: 0 0 20px 0;">
+                                Hi {{ user_name }},
+                            </p>
+                            
+                            <p style="color: #666666; line-height: 1.6; margin: 0 0 30px 0;">
+                                Thank you for registering with CredentialPath! To complete your registration and start issuing certificates, please enter the verification code below:
+                            </p>
+                            
+                            <!-- OTP Code -->
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td align="center" style="padding: 30px 0;">
+                                        <div style="background-color: #f8f9fa; 
+                                                    border: 2px dashed #1E6FFF; 
+                                                    border-radius: 8px; 
+                                                    padding: 20px 40px;
+                                                    display: inline-block;">
+                                            <span style="font-size: 36px; 
+                                                         font-weight: bold; 
+                                                         color: #1E6FFF; 
+                                                         letter-spacing: 8px;
+                                                         font-family: 'Courier New', monospace;">
+                                                {{ otp_code }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <p style="color: #666666; line-height: 1.6; margin: 30px 0 20px 0; text-align: center;">
+                                This code will expire in <strong>10 minutes</strong>
+                            </p>
+                            
+                            <p style="color: #999999; line-height: 1.6; margin: 0; font-size: 13px;">
+                                If you didn't create an account with CredentialPath, you can safely ignore this email.
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f8f8f8; padding: 20px 30px; text-align: center; border-top: 1px solid #eeeeee;">
+                            <p style="color: #999999; margin: 0; font-size: 12px;">
+                                © 2026 CredentialPath. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
