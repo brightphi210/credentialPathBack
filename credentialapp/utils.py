@@ -154,3 +154,31 @@ def send_password_reset_email(user, reset_link):
     except Exception as e:
         print(f"Error sending password reset email: {e}")
         return False
+    
+
+# Add this utility function to your utils.py or create a new notifications.py file
+
+from .models import Notification
+
+def create_notification(user, notification_type, title, message, certificate=None):
+    """
+    Create a notification for a user
+    
+    Args:
+        user: User object
+        notification_type: Type of notification (from Notification.NOTIFICATION_TYPES)
+        title: Notification title
+        message: Notification message
+        certificate: Optional Certificate object
+    
+    Returns:
+        Notification object
+    """
+    notification = Notification.objects.create(
+        user=user,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        certificate=certificate
+    )
+    return notification

@@ -181,3 +181,28 @@ class Certificate(models.Model):
                 self.phrase = 'has attended'
         
         super().save(*args, **kwargs)
+
+
+class Notification(models.Model):
+    NOTIFICATION_TYPES = (
+        ('certificate_created', 'Certificate Created'),
+        ('certificate_revoked', 'Certificate Revoked'),
+        ('certificate_deleted', 'Certificate Deleted'),
+        ('certificate_updated', 'Certificate Updated'),
+        ('bulk_upload', 'Bulk Upload'),
+    )
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES)
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    certificate = models.ForeignKey(Certificate, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = 'Notification'
+        verbose_name_plural = 'Notifications'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.title}"

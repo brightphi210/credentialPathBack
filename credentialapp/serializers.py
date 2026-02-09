@@ -1,7 +1,7 @@
 import datetime
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from .models import User, UserProfile, Certificate
+from .models import Notification, User, UserProfile, Certificate
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -213,3 +213,46 @@ class UpdateCertificateSerializer(serializers.ModelSerializer):
 
 class RevokeCertificateSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True)
+
+
+
+# Add this to your serializers.py file
+
+class NotificationSerializer(serializers.ModelSerializer):
+    type_display = serializers.CharField(source='get_notification_type_display', read_only=True)
+    timestamp = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'notification_type', 'type_display', 'title', 
+            'message', 'certificate', 'created_at', 'timestamp'
+        ]
+        read_only_fields = ['id', 'created_at']
+    
+    def get_timestamp(self, obj):
+        """Format timestamp as relative time"""
+        from datetime import datetime
+        
+        time_diff = datetime.now() - obj.created_at.replace(tzinfo=None)
+        
+        if time_diff.days > 0:
+            if time_diff.days == 1:
+                return "1 day ago"
+            elif time_diff.days < 7:
+                return f"{time_diff.days} days ago"
+            elif time_diff.days < 30:
+                weeks = time_diff.days // 7
+                return f"{weeks} week{'s' if weeks > 1 else ''} ago"
+            else:
+                months = time_diff.days // 30
+                return f"{months} month{'s' if months > 1 else ''} ago"
+        elif time_diff.seconds // 3600 > 0:
+            hours = time_diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        else:
+            minutes = time_diff.seconds // 60
+            if minutes > 0:
+                return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+            else:
+                return "just now"

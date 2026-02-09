@@ -605,3 +605,249 @@ def verify_certificate(request, credential_id):
             'valid': False,
             'message': 'Certificate not found'
         }, status=status.HTTP_404_NOT_FOUND)
+
+
+
+
+# Add these imports to your existing views.py
+from .models import Notification
+from .serializers import NotificationSerializer
+from .utils import create_notification  # or from .notifications import create_notification
+
+# ==================== NOTIFICATION VIEWS ====================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_notifications(request):
+    """
+    Get all notifications for authenticated user
+    GET /api/notifications/
+    Query params:
+        - type: Filter by notification type (optional)
+        - limit: Number of notifications to return (default: all)
+    """
+    user = request.user
+    notifications = Notification.objects.filter(user=user)
+    
+    # Filter by type if provided
+    notification_type = request.query_params.get('type', None)
+    if notification_type:
+        notifications = notifications.filter(notification_type=notification_type)
+    
+    # Limit if provided
+    limit = request.query_params.get('limit', None)
+    if limit:
+        try:
+            limit = int(limit)
+            notifications = notifications[:limit]
+        except ValueError:
+            pass
+    
+    serializer = NotificationSerializer(notifications, many=True)
+    return Response({
+        'notifications': serializer.data,
+        'total': notifications.count()
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_notification(request, notification_id):
+    """
+    Delete a notification
+    DELETE /api/notifications/<id>/delete/
+    """
+    notification = get_object_or_404(
+        Notification,
+        id=notification_id,
+        user=request.user
+    )
+    
+    notification.delete()
+    
+    return Response({
+        'message': 'Notification deleted successfully'
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def clear_all_notifications(request):
+    """
+    Clear all notifications for authenticated user
+    DELETE /api/notifications/clear-all/
+    """
+    user = request.user
+    deleted_count = Notification.objects.filter(user=user).delete()[0]
+    
+    return Response({
+        'message': f'{deleted_count} notifications cleared successfully'
+    }, status=status.HTTP_200_OK)
+
+
+# ==================== UPDATED CERTIFICATE VIEWS WITH NOTIFICATIONS ====================
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_single_certificate(request):
+    """
+    Create a single certificate with notification
+    POST /api/certificates/create/
+    """
+    user = request.user
+    serializer = CreateCertificateSerializer(data=request.data, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    
+    certificate = Certificate.objects.create(
+        issuer=user,
+        issuer_name=user.business_name or user.full_name,
+        issuer_location=user.profile.company_address,
+        **serializer.validated_data
+    )
+    
+    # Create notification
+    create_notification(
+        user=user,
+        notification_type='certificate_created',
+        title='Certificate Issued',
+        message=f'Certificate for {certificate.recipient} has been successfully issued.',
+        certificate=certificate
+    )
+    
+    return Response({
+        'message': 'Certificate created successfully',
+        'certificate': CertificateSerializer(certificate).data
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_bulk_certificates(request):
+    """
+    Create multiple certificates at once with notification
+    POST /api/certificates/bulk-create/
+    """
+    serializer = BulkCertificateSerializer(
+        data=request.data,
+        context={'request': request}
+    )
+    serializer.is_valid(raise_exception=True)
+    certificates = serializer.save()
+    
+    # Create notification for bulk upload
+    create_notification(
+        user=request.user,
+        notification_type='bulk_upload',
+        title='Bulk Upload Complete',
+        message=f'{len(certificates)} certificates have been successfully created from your upload.',
+        certificate=None
+    )
+    
+    return Response({
+        'message': f'{len(certificates)} certificates created successfully',
+        'certificates': CertificateSerializer(certificates, many=True).data
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def update_certificate(request, certificate_id):
+    """
+    Update certificate with notification
+    PUT/PATCH /api/certificates/<id>/update/
+    """
+    certificate = get_object_or_404(
+        Certificate,
+        id=certificate_id,
+        issuer=request.user
+    )
+    
+    serializer = UpdateCertificateSerializer(
+        certificate,
+        data=request.data,
+        partial=True
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    
+    # Create notification
+    create_notification(
+        user=request.user,
+        notification_type='certificate_updated',
+        title='Certificate Updated',
+        message=f'Certificate {certificate.certificate_no} for {certificate.recipient} has been updated.',
+        certificate=certificate
+    )
+    
+    return Response({
+        'message': 'Certificate updated successfully',
+        'certificate': CertificateSerializer(certificate).data
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def revoke_certificate(request, certificate_id):
+    """
+    Revoke a certificate with notification
+    POST /api/certificates/<id>/revoke/
+    """
+    certificate = get_object_or_404(
+        Certificate,
+        id=certificate_id,
+        issuer=request.user
+    )
+    
+    if certificate.status == 'revoked':
+        return Response({
+            'error': 'Certificate is already revoked'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    certificate.status = 'revoked'
+    certificate.save()
+    
+    # Create notification
+    create_notification(
+        user=request.user,
+        notification_type='certificate_revoked',
+        title='Certificate Revoked',
+        message=f'Certificate {certificate.certificate_no} has been revoked as requested.',
+        certificate=certificate
+    )
+    
+    return Response({
+        'message': 'Certificate revoked successfully',
+        'certificate': CertificateSerializer(certificate).data
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_certificate(request, certificate_id):
+    """
+    Delete a certificate with notification
+    DELETE /api/certificates/<id>/delete/
+    """
+    certificate = get_object_or_404(
+        Certificate,
+        id=certificate_id,
+        issuer=request.user
+    )
+    
+    cert_no = certificate.certificate_no
+    recipient = certificate.recipient
+    
+    certificate.delete()
+    
+    # Create notification
+    create_notification(
+        user=request.user,
+        notification_type='certificate_deleted',
+        title='Certificate Deleted',
+        message=f'Certificate {cert_no} for {recipient} has been permanently deleted.',
+        certificate=None
+    )
+    
+    return Response({
+        'message': 'Certificate deleted successfully'
+    }, status=status.HTTP_200_OK)

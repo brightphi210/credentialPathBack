@@ -1,3 +1,5 @@
+# Add these URL patterns to your existing urls.py
+
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import *
@@ -33,4 +35,9 @@ urlpatterns = [
     # Stats and Verification
     path('stats/', get_certificate_stats, name='certificate_stats'),
     path('verify/<str:credential_id>/', verify_certificate, name='verify_certificate'),
+    
+    # Notifications - NEW
+    path('notifications/', get_notifications, name='get_notifications'),
+    path('notifications/<int:notification_id>/delete/', delete_notification, name='delete_notification'),
+    path('notifications/clear-all/', clear_all_notifications, name='clear_all_notifications'),
 ]
