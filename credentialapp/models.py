@@ -158,7 +158,7 @@ class Certificate(models.Model):
         return f"{self.certificate_no} - {self.recipient}"
     
     def generate_verification_link(self):
-        return f"https://credentialpath.com/verify/{self.credential_id}"
+        return f"https://credentialpath.com/verify/"
     
     def generate_qr_code(self):
         link = self.verification_link or self.generate_verification_link()

@@ -851,3 +851,96 @@ def delete_certificate(request, certificate_id):
     return Response({
         'message': 'Certificate deleted successfully'
     }, status=status.HTTP_200_OK)
+
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Certificate
+from .serializers import CertificateSerializer
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def search_certificate(request):
+    """
+    Public endpoint to search for a certificate by credential_id OR certificate_no
+
+    POST /api/verify/search/
+    Body: {
+        "query": "CERT-2024-001" or "CRED-2024-001"
+    }
+    """
+    query = request.data.get('query', '').strip()
+
+    if not query:
+        return Response({
+            'status': 'error',
+            'message': 'Query parameter is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        certificate = None
+
+        # Try credential_id first, then certificate_no
+        try:
+            certificate = Certificate.objects.get(credential_id=query)
+        except Certificate.DoesNotExist:
+            try:
+                certificate = Certificate.objects.get(certificate_no=query)
+            except Certificate.DoesNotExist:
+                pass
+
+        if certificate:
+            serializer = CertificateSerializer(certificate)
+            return Response({
+                'status': 'verified',
+                'message': 'Certificate found and verified successfully',
+                'data': serializer.data
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'status': 'error',
+                'message': 'Certificate not found',
+                'detail': 'No certificate matches your query. Please check the credential ID or certificate number.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': 'An error occurred during verification',
+            'detail': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def verify_certificate(request, credential_id):
+    """
+    Public endpoint to verify a certificate by credential_id
+
+    GET /api/verify/<credential_id>/
+    """
+    try:
+        certificate = Certificate.objects.get(credential_id=credential_id)
+        serializer = CertificateSerializer(certificate)
+        return Response({
+            'status': 'verified',
+            'message': 'Certificate verified successfully',
+            'data': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    except Certificate.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': 'Certificate not found',
+            'detail': f'No certificate found with credential ID: {credential_id}'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': 'An error occurred during verification',
+            'detail': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
