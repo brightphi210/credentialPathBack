@@ -48,6 +48,10 @@ class UserProfileAdmin(admin.ModelAdmin):
     list_filter = ['created_at']
     readonly_fields = ['created_at', 'updated_at']
 
+@admin.register(Badge)
+class CertificateBadgesAdmin(admin.ModelAdmin):
+    pass
+
 @admin.register(Certificate)
 class CertificateAdmin(admin.ModelAdmin):
     list_display = [

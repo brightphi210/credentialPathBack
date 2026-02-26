@@ -1,7 +1,7 @@
 import datetime
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from .models import Notification, User, UserProfile, Certificate
+from .models import Notification, User, UserProfile, Certificate, Badge
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -256,3 +256,36 @@ class NotificationSerializer(serializers.ModelSerializer):
                 return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
             else:
                 return "just now"
+            
+
+
+class BadgeSerializer(serializers.ModelSerializer):
+    """Serializer for Badge model - full detail"""
+    issuer_email = serializers.EmailField(source='issuer.email', read_only=True)
+    certificate_no_ref = serializers.CharField(source='certificate.certificate_no', read_only=True)
+
+    class Meta:
+        model = Badge
+        fields = [
+            'id', 'badge_no', 'credential_id', 'recipient',
+            'program_line1', 'program_line2', 'issuer_name',
+            'issue_date', 'year', 'badge_svg', 'verification_link',
+            'status', 'created_at', 'updated_at',
+            'issuer_email', 'certificate_no_ref',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class BadgeListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for list views (excludes large SVG field)"""
+    issuer_email = serializers.EmailField(source='issuer.email', read_only=True)
+
+    class Meta:
+        model = Badge
+        fields = [
+            'id', 'badge_no', 'credential_id', 'recipient',
+            'program_line1', 'program_line2', 'issuer_name',
+            'issue_date', 'year', 'verification_link',
+            'status', 'created_at', 'issuer_email',
+        ]
+        read_only_fields = ['id', 'created_at']

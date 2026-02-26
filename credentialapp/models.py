@@ -206,3 +206,66 @@ class Notification(models.Model):
     
     def __str__(self):
         return f"{self.user.email} - {self.title}"
+    
+
+
+
+class Badge(models.Model):
+    """
+    Auto-generated when a Competence certificate is issued.
+    Stores the badge SVG and links back to the issuing certificate and recipient user context.
+    """
+    STATUS_CHOICES = (
+        ('active', 'Active'),
+        ('revoked', 'Revoked'),
+    )
+
+    # The user (issuer) who owns/issued this badge
+    issuer = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='issued_badges'
+    )
+
+    # Linked certificate (one-to-one: one badge per competence cert)
+    certificate = models.OneToOneField(
+        Certificate,
+        on_delete=models.CASCADE,
+        related_name='badge',
+        null=True,
+        blank=True
+    )
+
+    # Badge details (mirrored from certificate for quick access)
+    badge_no = models.CharField(max_length=100, unique=True)          # mirrors certificate_no
+    credential_id = models.CharField(max_length=100, unique=True)     # mirrors credential_id
+    recipient = models.CharField(max_length=255)
+    program_line1 = models.CharField(max_length=255)
+    program_line2 = models.CharField(max_length=255, blank=True)
+    issuer_name = models.CharField(max_length=255)
+    issue_date = models.DateField()
+    year = models.CharField(max_length=4)
+
+    # The generated SVG content
+    badge_svg = models.TextField(blank=True)
+
+    # Verification
+    verification_link = models.URLField(max_length=500, blank=True)
+
+    # Status mirrors the linked certificate
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Badge'
+        verbose_name_plural = 'Badges'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['issuer', 'status']),
+            models.Index(fields=['credential_id']),
+        ]
+
+    def __str__(self):
+        return f"Badge: {self.badge_no} – {self.recipient}"

@@ -39,6 +39,11 @@ urlpatterns = [
     path('certificate/verify/<str:credential_id>/', verify_certificate, name='verify_certificate'),
     
     
+    path('badges/', get_badges,                   name='get_badges'),
+    path('badges/stats/',                          get_badge_stats,              name='badge_stats'),
+    path('badges/<int:badge_id>/',                 get_badge_detail,             name='badge_detail'),
+    path('badges/credential/<str:credential_id>/', get_badge_by_credential,      name='badge_by_credential'),
+    path('badges/verify/<str:credential_id>/',     verify_badge,                 name='verify_badge'),
     # ==================== NOTIFICATIONS ====================
     path('notifications/', get_notifications, name='get_notifications'),
     path('notifications/clear-all/', clear_all_notifications, name='clear_all_notifications'),

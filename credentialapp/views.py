@@ -4,19 +4,20 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from .models import User, UserProfile, Certificate
+from .models import Badge, Certificate, Notification, User, UserProfile
+from .serializers import BadgeSerializer, BadgeListSerializer  # etc.
 from .serializers import (
     RegisterSerializer, LoginSerializer, UserSerializer,
     ChangePasswordSerializer, UpdateProfileSerializer, UserProfileSerializer, 
     CertificateSerializer, CreateCertificateSerializer,
     BulkCertificateSerializer, UpdateCertificateSerializer,
-    RevokeCertificateSerializer
+    RevokeCertificateSerializer, NotificationSerializer
 )
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, Count
 from datetime import datetime, timedelta
 
-from .utils import send_verification_email, send_welcome_email, is_otp_valid
+from .utils import send_verification_email, send_welcome_email, is_otp_valid, create_notification
 
 
 class RegisterView(generics.CreateAPIView):
@@ -609,10 +610,6 @@ def verify_certificate(request, credential_id):
 
 
 
-# Add these imports to your existing views.py
-from .models import Notification
-from .serializers import NotificationSerializer
-from .utils import create_notification  # or from .notifications import create_notification
 
 # ==================== NOTIFICATION VIEWS ====================
 
@@ -853,13 +850,6 @@ def delete_certificate(request, certificate_id):
     }, status=status.HTTP_200_OK)
 
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status
-from .models import Certificate
-from .serializers import CertificateSerializer
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -944,3 +934,115 @@ def verify_certificate(request, credential_id):
             'message': 'An error occurred during verification',
             'detail': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_badges(request):
+    """
+    List all badges for the authenticated user (issuer).
+    Badges are auto-created when a Competence certificate is issued.
+
+    GET /api/badges/
+    Query params:
+        - status: 'active' | 'revoked' | 'all' (default: all)
+        - search: search by recipient, program, credential_id
+    """
+    user = request.user
+    badges = Badge.objects.filter(issuer=user)
+
+    # Filter by status
+    status_filter = request.query_params.get('status', None)
+    if status_filter and status_filter != 'all':
+        badges = badges.filter(status=status_filter)
+
+    # Search filter
+    search = request.query_params.get('search', None)
+    if search:
+        badges = badges.filter(
+            Q(recipient__icontains=search) |
+            Q(program_line1__icontains=search) |
+            Q(program_line2__icontains=search) |
+            Q(credential_id__icontains=search) |
+            Q(badge_no__icontains=search)
+        )
+
+    serializer = BadgeListSerializer(badges, many=True)
+    return Response({
+        'badges': serializer.data,
+        'total': badges.count(),
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_badge_detail(request, badge_id):
+    """
+    Get full badge detail including SVG.
+    GET /api/badges/<id>/
+    """
+    badge = get_object_or_404(Badge, id=badge_id, issuer=request.user)
+    serializer = BadgeSerializer(badge)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_badge_by_credential(request, credential_id):
+    """
+    Get badge by credential_id.
+    GET /api/badges/credential/<credential_id>/
+    """
+    badge = get_object_or_404(Badge, credential_id=credential_id, issuer=request.user)
+    serializer = BadgeSerializer(badge)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_badge_stats(request):
+    """
+    Get badge statistics.
+    GET /api/badges/stats/
+    """
+    user = request.user
+    badges = Badge.objects.filter(issuer=user)
+
+    current_month = datetime.now().month
+    current_year = datetime.now().year
+
+    stats = {
+        'total': badges.count(),
+        'active': badges.filter(status='active').count(),
+        'revoked': badges.filter(status='revoked').count(),
+        'this_month': badges.filter(
+            issue_date__month=current_month,
+            issue_date__year=current_year
+        ).count(),
+    }
+
+    return Response(stats, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def verify_badge(request, credential_id):
+    """
+    Public endpoint to verify a badge.
+    GET /api/badges/verify/<credential_id>/
+    """
+    try:
+        badge = Badge.objects.get(credential_id=credential_id)
+        serializer = BadgeSerializer(badge)
+        return Response({
+            'valid': badge.status == 'active',
+            'message': 'Badge is valid' if badge.status == 'active' else 'Badge has been revoked',
+            'badge': serializer.data,
+        }, status=status.HTTP_200_OK)
+    except Badge.DoesNotExist:
+        return Response({
+            'valid': False,
+            'message': 'Badge not found',
+        }, status=status.HTTP_404_NOT_FOUND)
