@@ -7,7 +7,7 @@ from .models import Notification, User, UserProfile, Certificate, Badge
 class UserProfileSerializer(serializers.ModelSerializer):
     profile_image_url = serializers.SerializerMethodField()
     company_logo_url = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = UserProfile
         fields = [
@@ -15,14 +15,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'linkedin_handle', 'twitter_handle', 'facebook_handle', 'instagram_handle',
             'default_signatory_name', 'default_signatory_title', 'company_logo', 'company_logo_url'
         ]
-    
+
     def get_profile_image_url(self, obj):
         if obj.profile_image:
             request = self.context.get('request')
             if request:
                 return request.build_absolute_uri(obj.profile_image.url)
         return None
-    
+
     def get_company_logo_url(self, obj):
         if obj.company_logo:
             request = self.context.get('request')
@@ -33,7 +33,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     profile = UserProfileSerializer(read_only=True)
-    
+
     class Meta:
         model = User
         fields = ['id', 'email', 'full_name', 'business_name', 'date_joined', 'profile']
@@ -43,16 +43,16 @@ class UserSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
-    
+
     class Meta:
         model = User
         fields = ['email', 'full_name', 'business_name', 'password', 'password2']
-    
+
     def validate(self, attrs):
         if attrs['password'] != attrs['password2']:
             raise serializers.ValidationError({"password": "Password fields didn't match."})
         return attrs
-    
+
     def create(self, validated_data):
         validated_data.pop('password2')
         user = User.objects.create_user(
@@ -73,7 +73,7 @@ class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True, write_only=True)
     new_password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
     new_password2 = serializers.CharField(required=True, write_only=True)
-    
+
     def validate(self, attrs):
         if attrs['new_password'] != attrs['new_password2']:
             raise serializers.ValidationError({"new_password": "Password fields didn't match."})
@@ -92,7 +92,7 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
     instagram_handle = serializers.CharField(required=False, allow_blank=True)
     default_signatory_name = serializers.CharField(required=False, allow_blank=True)
     default_signatory_title = serializers.CharField(required=False, allow_blank=True)
-    
+
     class Meta:
         model = UserProfile
         fields = [
@@ -100,94 +100,94 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
             'linkedin_handle', 'twitter_handle', 'facebook_handle', 'instagram_handle',
             'default_signatory_name', 'default_signatory_title', 'company_logo'
         ]
-    
+
     def update(self, instance, validated_data):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         return instance
-    
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CERTIFICATE SERIALIZERS
+# ─────────────────────────────────────────────────────────────────────────────
 
 class CertificateSerializer(serializers.ModelSerializer):
+    """
+    Read-only serializer for returning certificate data.
+    Returns certificate_no (human-readable) but NOT credential_id —
+    credential_id is a backend-only identifier.
+    """
     issuer_email = serializers.EmailField(source='issuer.email', read_only=True)
-    
+
     class Meta:
         model = Certificate
         fields = [
-            'id', 'certificate_no', 'credential_id', 'recipient', 'course',
+            'id', 'certificate_no', 'recipient', 'course',
             'program', 'certificate_type', 'phrase', 'issue_date',
             'delivery_mode', 'competence_result', 'competence_expiry_date', 'hours_cpd',
             'signatory_name', 'signatory_title', 'issuer_name', 'issuer_location',
             'verification_link', 'qr_code', 'status', 'created_at', 'updated_at',
-            'issuer_email'
+            'issuer_email',
         ]
-        read_only_fields = ['id', 'verification_link', 'qr_code', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'certificate_no', 'verification_link', 'qr_code',
+            'created_at', 'updated_at',
+        ]
 
 
 class CreateCertificateSerializer(serializers.ModelSerializer):
+    """
+    Input serializer for creating a single certificate.
+
+    certificate_no and credential_id are intentionally excluded — they are
+    auto-generated by Certificate.save() and should never be supplied by
+    the client.
+    """
+
     class Meta:
         model = Certificate
         fields = [
-            'certificate_no', 'credential_id', 'recipient', 'course',
-            'program', 'certificate_type', 'phrase', 'issue_date',
-            'delivery_mode', 'competence_result', 'competence_expiry_date', 'hours_cpd',
-            'signatory_name', 'signatory_title'
+            'recipient', 'course', 'program', 'certificate_type', 'phrase',
+            'issue_date', 'delivery_mode', 'competence_result',
+            'competence_expiry_date', 'hours_cpd',
+            'signatory_name', 'signatory_title',
         ]
-    
-    def validate_certificate_no(self, value):
-        if Certificate.objects.filter(certificate_no=value).exists():
-            raise serializers.ValidationError("Certificate number already exists")
-        return value
-    
-    def validate_credential_id(self, value):
-        if Certificate.objects.filter(credential_id=value).exists():
-            raise serializers.ValidationError("Credential ID already exists")
-        return value
-    
+
     def validate_issue_date(self, value):
-        """Ensure issue_date is in correct format"""
         if isinstance(value, str):
-            try:
-                # Try to parse various date formats
-                for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y'):
-                    try:
-                        return datetime.datetime.strptime(value, fmt).date()
-                    except ValueError:
-                        continue
-                raise ValueError("Invalid date format")
-            except ValueError:
-                raise serializers.ValidationError(
-                    "Date has wrong format. Use YYYY-MM-DD format."
-                )
+            for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y'):
+                try:
+                    return datetime.datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+            raise serializers.ValidationError("Date has wrong format. Use YYYY-MM-DD format.")
         return value
-    
+
     def validate_competence_expiry_date(self, value):
-        """Ensure competence_expiry_date is in correct format"""
         if not value:
             return None
         if isinstance(value, str):
-            try:
-                for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y'):
-                    try:
-                        return datetime.datetime.strptime(value, fmt).date()
-                    except ValueError:
-                        continue
-                raise ValueError("Invalid date format")
-            except ValueError:
-                raise serializers.ValidationError(
-                    "Date has wrong format. Use YYYY-MM-DD format."
-                )
+            for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y'):
+                try:
+                    return datetime.datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+            raise serializers.ValidationError("Date has wrong format. Use YYYY-MM-DD format.")
         return value
 
 
 class BulkCertificateSerializer(serializers.Serializer):
+    """
+    Input serializer for creating multiple certificates at once.
+    Each row uses CreateCertificateSerializer — no certificate_no or credential_id.
+    """
     certificates = CreateCertificateSerializer(many=True)
-    
+
     def create(self, validated_data):
         user = self.context['request'].user
         certificates_data = validated_data['certificates']
-        
+
         certificates = []
         for cert_data in certificates_data:
             certificate = Certificate.objects.create(
@@ -197,7 +197,7 @@ class BulkCertificateSerializer(serializers.Serializer):
                 **cert_data
             )
             certificates.append(certificate)
-        
+
         return certificates
 
 
@@ -215,27 +215,25 @@ class RevokeCertificateSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True)
 
 
-
-# Add this to your serializers.py file
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTIFICATION SERIALIZER
+# ─────────────────────────────────────────────────────────────────────────────
 
 class NotificationSerializer(serializers.ModelSerializer):
     type_display = serializers.CharField(source='get_notification_type_display', read_only=True)
     timestamp = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Notification
         fields = [
-            'id', 'notification_type', 'type_display', 'title', 
+            'id', 'notification_type', 'type_display', 'title',
             'message', 'certificate', 'created_at', 'timestamp'
         ]
         read_only_fields = ['id', 'created_at']
-    
+
     def get_timestamp(self, obj):
-        """Format timestamp as relative time"""
-        from datetime import datetime
-        
-        time_diff = datetime.now() - obj.created_at.replace(tzinfo=None)
-        
+        time_diff = datetime.datetime.now() - obj.created_at.replace(tzinfo=None)
+
         if time_diff.days > 0:
             if time_diff.days == 1:
                 return "1 day ago"
@@ -252,15 +250,14 @@ class NotificationSerializer(serializers.ModelSerializer):
             return f"{hours} hour{'s' if hours > 1 else ''} ago"
         else:
             minutes = time_diff.seconds // 60
-            if minutes > 0:
-                return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-            else:
-                return "just now"
-            
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago" if minutes > 0 else "just now"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BADGE SERIALIZERS
+# ─────────────────────────────────────────────────────────────────────────────
 
 class BadgeSerializer(serializers.ModelSerializer):
-    """Serializer for Badge model - full detail"""
     issuer_email = serializers.EmailField(source='issuer.email', read_only=True)
     certificate_no_ref = serializers.CharField(source='certificate.certificate_no', read_only=True)
 
@@ -277,7 +274,6 @@ class BadgeSerializer(serializers.ModelSerializer):
 
 
 class BadgeListSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for list views (excludes large SVG field)"""
     issuer_email = serializers.EmailField(source='issuer.email', read_only=True)
 
     class Meta:
