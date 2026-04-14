@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.utils import timezone
 from .models import Badge, Certificate, Notification, User, UserProfile
 from .serializers import BadgeSerializer, BadgeListSerializer
 from .serializers import (
@@ -16,7 +17,6 @@ from .serializers import (
 )
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, Count
-
 from .utils import send_verification_email, send_welcome_email, is_otp_valid, create_notification
 
 
@@ -44,30 +44,23 @@ class RegisterView(generics.CreateAPIView):
 def verify_email_otp(request):
     email = request.data.get('email')
     otp = request.data.get('otp')
-
     if not email or not otp:
         return Response({'error': 'Email and OTP code are required'}, status=status.HTTP_400_BAD_REQUEST)
-
     try:
         user = User.objects.get(email=email)
         if user.is_email_verified:
             return Response({'message': 'Email already verified. You can login now.', 'already_verified': True})
-
         if not is_otp_valid(user):
             return Response({'error': 'OTP has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
-
         if user.email_verification_otp != otp:
             return Response({'error': 'Invalid OTP code. Please check and try again.'}, status=status.HTTP_400_BAD_REQUEST)
-
         user.is_email_verified = True
         user.is_active = True
         user.email_verification_otp = None
         user.otp_created_at = None
         user.save()
         send_welcome_email(user)
-
         return Response({'message': 'Email verified successfully! You can now login.', 'verified': True})
-
     except User.DoesNotExist:
         return Response({'error': 'No account found with this email address'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -77,38 +70,29 @@ def verify_email_otp(request):
 def login_view(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-
     email = serializer.validated_data['email']
     password = serializer.validated_data['password']
-
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-
     if not user.is_email_verified:
         return Response({
-            'error': 'Please verify your email before logging in. Check your inbox for the OTP code.',
+            'error': 'Please verify your email before logging in.',
             'email_verified': False,
             'email': email,
         }, status=status.HTTP_403_FORBIDDEN)
-
     user = authenticate(email=email, password=password)
     if user is None:
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
     if not user.is_active:
-        return Response({'error': 'Account is disabled. Please contact support.'}, status=status.HTTP_403_FORBIDDEN)
-
+        return Response({'error': 'Account is disabled.'}, status=status.HTTP_403_FORBIDDEN)
     refresh = RefreshToken.for_user(user)
     user_serializer = UserSerializer(user, context={'request': request})
-
     return Response({
         'message': 'Login successful',
         'user': user_serializer.data,
-        'tokens': {
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-        },
+        'tokens': {'refresh': str(refresh), 'access': str(refresh.access_token)},
     })
 
 
@@ -124,17 +108,14 @@ def get_user_profile(request):
 def update_user_profile(request):
     user = request.user
     profile = user.profile
-
     if 'full_name' in request.data:
         user.full_name = request.data['full_name']
     if 'business_name' in request.data:
         user.business_name = request.data['business_name']
     user.save()
-
     serializer = UpdateProfileSerializer(profile, data=request.data, partial=True, context={'request': request})
     serializer.is_valid(raise_exception=True)
     serializer.save()
-
     user_serializer = UserSerializer(user, context={'request': request})
     return Response({'message': 'Profile updated successfully', 'user': user_serializer.data})
 
@@ -145,10 +126,8 @@ def change_password(request):
     user = request.user
     serializer = ChangePasswordSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-
     if not user.check_password(serializer.validated_data['old_password']):
         return Response({'error': 'Old password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
-
     user.set_password(serializer.validated_data['new_password'])
     user.save()
     return Response({'message': 'Password changed successfully'})
@@ -173,17 +152,14 @@ def resend_verification_otp(request):
     email = request.data.get('email')
     if not email:
         return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
-
     try:
         user = User.objects.get(email=email)
         if user.is_email_verified:
             return Response({'message': 'Email already verified. You can login now.'})
-
         email_sent = send_verification_email(user, request)
         if email_sent:
             return Response({'message': 'A new verification code has been sent to your email.'})
         return Response({'error': 'Failed to send email. Please try again later.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
     except User.DoesNotExist:
         return Response({'error': 'No account found with this email address'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -191,7 +167,7 @@ def resend_verification_otp(request):
 # ==================== CERTIFICATE VIEWS ====================
 
 class CertificateListView(generics.ListAPIView):
-    """GET /api/certificates/"""
+    """GET /api/certificate/"""
     serializer_class = CertificateSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -201,42 +177,31 @@ class CertificateListView(generics.ListAPIView):
 
     def get_queryset(self):
         queryset = Certificate.objects.filter(issuer=self.request.user)
-
         status_filter = self.request.query_params.get('status', None)
         if status_filter and status_filter != 'all':
             queryset = queryset.filter(status=status_filter)
-
         cert_type = self.request.query_params.get('type', None)
         if cert_type:
             queryset = queryset.filter(certificate_type=cert_type)
-
         program = self.request.query_params.get('program', None)
         if program:
             queryset = queryset.filter(program=program)
-
         return queryset
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_single_certificate(request):
-    """
-    POST /api/certificates/create/
-
-    The client does NOT send certificate_no or credential_id — both are
-    auto-generated by Certificate.save().
-    """
+    """POST /api/certificate/create/"""
     user = request.user
     serializer = CreateCertificateSerializer(data=request.data, context={'request': request})
     serializer.is_valid(raise_exception=True)
-
     certificate = Certificate.objects.create(
         issuer=user,
         issuer_name=user.business_name or user.full_name,
         issuer_location=user.profile.company_address,
         **serializer.validated_data,
     )
-
     create_notification(
         user=user,
         notification_type='certificate_created',
@@ -244,7 +209,6 @@ def create_single_certificate(request):
         message=f'Certificate for {certificate.recipient} ({certificate.certificate_no}) has been successfully issued.',
         certificate=certificate,
     )
-
     return Response({
         'message': 'Certificate created successfully',
         'certificate': CertificateSerializer(certificate).data,
@@ -254,19 +218,17 @@ def create_single_certificate(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_bulk_certificates(request):
-    """POST /api/certificates/bulk-create/"""
+    """POST /api/certificate/bulk-create/"""
     serializer = BulkCertificateSerializer(data=request.data, context={'request': request})
     serializer.is_valid(raise_exception=True)
     certificates = serializer.save()
-
     create_notification(
         user=request.user,
         notification_type='bulk_upload',
         title='Bulk Upload Complete',
-        message=f'{len(certificates)} certificates have been successfully created from your upload.',
+        message=f'{len(certificates)} certificates have been successfully created.',
         certificate=None,
     )
-
     return Response({
         'message': f'{len(certificates)} certificates created successfully',
         'certificates': CertificateSerializer(certificates, many=True).data,
@@ -276,7 +238,7 @@ def create_bulk_certificates(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_certificate_detail(request, certificate_id):
-    """GET /api/certificates/<id>/"""
+    """GET /api/certificate/<id>/"""
     certificate = get_object_or_404(Certificate, id=certificate_id, issuer=request.user)
     return Response(CertificateSerializer(certificate).data)
 
@@ -284,12 +246,11 @@ def get_certificate_detail(request, certificate_id):
 @api_view(['PUT', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def update_certificate(request, certificate_id):
-    """PUT/PATCH /api/certificates/<id>/update/"""
+    """PUT/PATCH /api/certificate/<id>/update/"""
     certificate = get_object_or_404(Certificate, id=certificate_id, issuer=request.user)
     serializer = UpdateCertificateSerializer(certificate, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     serializer.save()
-
     create_notification(
         user=request.user,
         notification_type='certificate_updated',
@@ -297,7 +258,6 @@ def update_certificate(request, certificate_id):
         message=f'Certificate {certificate.certificate_no} for {certificate.recipient} has been updated.',
         certificate=certificate,
     )
-
     return Response({
         'message': 'Certificate updated successfully',
         'certificate': CertificateSerializer(certificate).data,
@@ -307,23 +267,19 @@ def update_certificate(request, certificate_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def revoke_certificate(request, certificate_id):
-    """POST /api/certificates/<id>/revoke/"""
+    """POST /api/certificate/<id>/revoke/"""
     certificate = get_object_or_404(Certificate, id=certificate_id, issuer=request.user)
-
     if certificate.status == 'revoked':
         return Response({'error': 'Certificate is already revoked'}, status=status.HTTP_400_BAD_REQUEST)
-
     certificate.status = 'revoked'
     certificate.save()
-
     create_notification(
         user=request.user,
         notification_type='certificate_revoked',
         title='Certificate Revoked',
-        message=f'Certificate {certificate.certificate_no} has been revoked as requested.',
+        message=f'Certificate {certificate.certificate_no} has been revoked.',
         certificate=certificate,
     )
-
     return Response({
         'message': 'Certificate revoked successfully',
         'certificate': CertificateSerializer(certificate).data,
@@ -333,12 +289,11 @@ def revoke_certificate(request, certificate_id):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_certificate(request, certificate_id):
-    """DELETE /api/certificates/<id>/delete/"""
+    """DELETE /api/certificate/<id>/delete/"""
     certificate = get_object_or_404(Certificate, id=certificate_id, issuer=request.user)
     cert_no = certificate.certificate_no
     recipient = certificate.recipient
     certificate.delete()
-
     create_notification(
         user=request.user,
         notification_type='certificate_deleted',
@@ -346,18 +301,17 @@ def delete_certificate(request, certificate_id):
         message=f'Certificate {cert_no} for {recipient} has been permanently deleted.',
         certificate=None,
     )
-
     return Response({'message': 'Certificate deleted successfully'})
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_certificate_stats(request):
-    """GET /api/certificates/stats/"""
+    """GET /api/stats/"""
     user = request.user
     certificates = Certificate.objects.filter(issuer=user)
-    now = datetime.datetime.now()
-
+    # ✅ FIXED: use timezone.now() so it's timezone-aware, matching DateTimeField values
+    now = timezone.now()
     stats = {
         'total': certificates.count(),
         'active': certificates.filter(status='active').count(),
@@ -371,9 +325,7 @@ def get_certificate_stats(request):
             'attendance': certificates.filter(certificate_type='Attendance').count(),
         },
         'by_program': list(
-            certificates.values('program')
-            .annotate(count=Count('id'))
-            .order_by('-count')[:5]
+            certificates.values('program').annotate(count=Count('id')).order_by('-count')[:5]
         ),
     }
     return Response(stats)
@@ -382,11 +334,11 @@ def get_certificate_stats(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_monthly_certificate_data(request):
-    """GET /api/certificates/monthly-data/"""
+    """GET /api/certificate/monthly-data/"""
     user = request.user
-    current_date = datetime.datetime.now()
+    # ✅ FIXED: use timezone.now() instead of datetime.datetime.now()
+    current_date = timezone.now()
     monthly_data = []
-
     for i in range(5, -1, -1):
         target_date = current_date - datetime.timedelta(days=30 * i)
         count = Certificate.objects.filter(
@@ -395,21 +347,20 @@ def get_monthly_certificate_data(request):
             issue_date__year=target_date.year,
         ).count()
         monthly_data.append({'month': target_date.strftime('%b'), 'total': count})
-
     return Response(monthly_data)
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_recent_activity(request):
-    """GET /api/certificates/recent-activity/"""
+    """GET /api/certificate/recent-activity/"""
     user = request.user
     limit = int(request.query_params.get('limit', 5))
     recent_certificates = Certificate.objects.filter(issuer=user).order_by('-created_at')[:limit]
-
     activities = []
     for cert in recent_certificates:
-        time_diff = datetime.datetime.now() - cert.created_at.replace(tzinfo=None)
+        # ✅ FIXED: use timezone.now() to avoid naive vs aware datetime comparison crash
+        time_diff = timezone.now() - cert.created_at
         if time_diff.days > 0:
             time_ago = f"{time_diff.days}d ago"
         elif time_diff.seconds // 3600 > 0:
@@ -417,18 +368,11 @@ def get_recent_activity(request):
         else:
             minutes = time_diff.seconds // 60
             time_ago = f"{minutes}m ago" if minutes > 0 else "just now"
-
         activities.append({
-            'id': cert.id,
-            'recipient': cert.recipient,
-            'type': cert.certificate_type,
-            'course': cert.course,
-            'certificate_no': cert.certificate_no,
-            'date': time_ago,
-            'status': cert.status,
-            'created_at': cert.created_at.isoformat(),
+            'id': cert.id, 'recipient': cert.recipient, 'type': cert.certificate_type,
+            'course': cert.course, 'certificate_no': cert.certificate_no,
+            'date': time_ago, 'status': cert.status, 'created_at': cert.created_at.isoformat(),
         })
-
     return Response(activities)
 
 
@@ -438,23 +382,23 @@ def get_recent_activity(request):
 @permission_classes([AllowAny])
 def search_certificate(request):
     """
-    POST /api/verify/search/
-    Body: { "query": "TECHACADEMY-2026-00001" }
-
-    Searches by certificate_no (the human-readable number shown on the certificate).
-    Credential ID is backend-only and is NOT searched here.
+    POST /api/certificate/verify/search/
+    Body: { "query": "TA26040801" }
+    Searches by certificate_no only (the human-readable number on the certificate).
     """
     query = request.data.get('query', '').strip()
-
     if not query:
-        return Response({'status': 'error', 'message': 'Query parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'status': 'error', 'message': 'Query parameter is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     try:
-        # Search only by certificate_no — the public-facing identifier
+        # Exact match first
         try:
             certificate = Certificate.objects.get(certificate_no=query)
         except Certificate.DoesNotExist:
-            # Fallback: case-insensitive partial match on certificate_no
+            # Case-insensitive fallback
             certificates = Certificate.objects.filter(certificate_no__iexact=query)
             if certificates.exists():
                 certificate = certificates.first()
@@ -465,11 +409,10 @@ def search_certificate(request):
                     'detail': 'No certificate matches your query. Please check the certificate number.',
                 }, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = CertificateSerializer(certificate)
         return Response({
             'status': 'verified',
             'message': 'Certificate found and verified successfully',
-            'data': serializer.data,
+            'data': CertificateSerializer(certificate).data,
         })
 
     except Exception as e:
@@ -484,27 +427,22 @@ def search_certificate(request):
 @permission_classes([AllowAny])
 def verify_certificate(request, certificate_no):
     """
-    GET /api/verify/<certificate_no>/
-
-    Public verification endpoint — uses certificate_no (human-readable),
-    not the internal credential_id.
+    GET /api/certificate/verify/<certificate_no>/
+    Public endpoint — uses certificate_no (human-readable), NOT credential_id.
     """
     try:
         certificate = Certificate.objects.get(certificate_no=certificate_no)
-        serializer = CertificateSerializer(certificate)
         return Response({
             'status': 'verified' if certificate.status == 'active' else 'revoked',
             'message': 'Certificate is valid' if certificate.status == 'active' else 'Certificate has been revoked',
-            'data': serializer.data,
+            'data': CertificateSerializer(certificate).data,
         })
-
     except Certificate.DoesNotExist:
         return Response({
             'status': 'error',
             'message': 'Certificate not found',
             'detail': f'No certificate found with number: {certificate_no}',
         }, status=status.HTTP_404_NOT_FOUND)
-
     except Exception as e:
         return Response({
             'status': 'error',
@@ -521,18 +459,15 @@ def get_notifications(request):
     """GET /api/notifications/"""
     user = request.user
     notifications = Notification.objects.filter(user=user)
-
     notification_type = request.query_params.get('type', None)
     if notification_type:
         notifications = notifications.filter(notification_type=notification_type)
-
     limit = request.query_params.get('limit', None)
     if limit:
         try:
             notifications = notifications[:int(limit)]
         except ValueError:
             pass
-
     serializer = NotificationSerializer(notifications, many=True)
     return Response({'notifications': serializer.data, 'total': notifications.count()})
 
@@ -562,21 +497,16 @@ def get_badges(request):
     """GET /api/badges/"""
     user = request.user
     badges = Badge.objects.filter(issuer=user)
-
     status_filter = request.query_params.get('status', None)
     if status_filter and status_filter != 'all':
         badges = badges.filter(status=status_filter)
-
     search = request.query_params.get('search', None)
     if search:
         badges = badges.filter(
-            Q(recipient__icontains=search) |
-            Q(program_line1__icontains=search) |
-            Q(program_line2__icontains=search) |
-            Q(credential_id__icontains=search) |
+            Q(recipient__icontains=search) | Q(program_line1__icontains=search) |
+            Q(program_line2__icontains=search) | Q(credential_id__icontains=search) |
             Q(badge_no__icontains=search)
         )
-
     serializer = BadgeListSerializer(badges, many=True)
     return Response({'badges': serializer.data, 'total': badges.count()})
 
@@ -603,8 +533,8 @@ def get_badge_stats(request):
     """GET /api/badges/stats/"""
     user = request.user
     badges = Badge.objects.filter(issuer=user)
-    now = datetime.datetime.now()
-
+    # ✅ FIXED: use timezone.now()
+    now = timezone.now()
     stats = {
         'total': badges.count(),
         'active': badges.filter(status='active').count(),
@@ -629,3 +559,30 @@ def verify_badge(request, credential_id):
         })
     except Badge.DoesNotExist:
         return Response({'valid': False, 'message': 'Badge not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+import os
+import mimetypes
+from django.http import HttpResponse, Http404
+from django.conf import settings
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def proxy_media(request, path):
+    """Serve media files with CORS headers so the frontend can fetch→base64 them."""
+    safe_path = os.path.normpath(path)
+    # Prevent directory traversal
+    if safe_path.startswith('..') or safe_path.startswith('/'):
+        raise Http404
+    full_path = os.path.join(settings.MEDIA_ROOT, safe_path)
+    if not os.path.exists(full_path):
+        raise Http404
+    mime_type, _ = mimetypes.guess_type(full_path)
+    with open(full_path, 'rb') as f:
+        response = HttpResponse(f.read(), content_type=mime_type or 'application/octet-stream')
+    response['Access-Control-Allow-Origin'] = '*'
+    response['Cache-Control'] = 'public, max-age=86400'
+    return response

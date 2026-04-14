@@ -1,4 +1,3 @@
-# Create your models here.
 import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
@@ -19,12 +18,10 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
         extra_fields.setdefault('is_email_verified', True)
-
         if extra_fields.get('is_staff') is not True:
             raise ValueError('Superuser must have is_staff=True')
         if extra_fields.get('is_superuser') is not True:
             raise ValueError('Superuser must have is_superuser=True')
-
         return self.create_user(email, password, **extra_fields)
 
 
@@ -63,12 +60,11 @@ class UserProfile(models.Model):
     twitter_handle = models.CharField(max_length=100, blank=True)
     facebook_handle = models.CharField(max_length=100, blank=True)
     instagram_handle = models.CharField(max_length=100, blank=True)
-
-    # Certificate defaults
     default_signatory_name = models.CharField(max_length=255, blank=True)
     default_signatory_title = models.CharField(max_length=255, blank=True)
     company_logo = models.ImageField(upload_to='company_logos/', null=True, blank=True)
-
+    # ── NEW: signatory signature image (compulsory for certificate issuance) ──
+    signature = models.ImageField(upload_to='signatures/', null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -84,61 +80,72 @@ class UserProfile(models.Model):
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _slugify_business(name: str) -> str:
+def _company_slug(name: str) -> str:
     """
-    Convert a business/issuer name to a short uppercase slug suitable for
-    embedding in a certificate number.
+    Extract up to 2 uppercase alphabetic characters from the company/issuer name
+    to use as a short prefix in the certificate number.
 
     Examples:
-        "TechAcademy Ltd."   → "TECHACADEMY"
-        "Acme Training Co."  → "ACMETRAINING"
-        "ISO Global"         → "ISOGLOBAL"
+        "TechAcademy Ltd."  → "TA"
+        "Acme Training Co." → "AT"
+        "ISO Global"        → "IG"
+        "XYZ"               → "XY"
     """
     import re
-    # Remove common suffixes and punctuation, upper-case, strip whitespace
-    cleaned = re.sub(r'[^A-Za-z0-9\s]', '', name)
-    cleaned = re.sub(r'\s+', '', cleaned)
-    return cleaned.upper()[:20]  # cap at 20 chars
+    # Keep only letters, split into words, take first letter of each word
+    words = re.findall(r'[A-Za-z]+', name)
+    if not words:
+        return 'XX'
+    # Use first letters of first two words (or repeat first if only one word)
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return (words[0][0] + words[1][0]).upper()
 
 
 def _next_cert_sequence(issuer) -> int:
     """
-    Return the next sequential integer for certificates issued by *issuer*.
-    We count all existing certificates (regardless of status) and add 1.
-    This gives a simple, ever-increasing number and avoids gaps-on-delete issues.
+    Return the next sequential integer for certificates issued by this issuer.
+    Counts all existing certificates (regardless of status) and adds 1.
     """
     return Certificate.objects.filter(issuer=issuer).count() + 1
 
 
 def generate_certificate_no(issuer) -> str:
     """
-    Build a human-readable, unique certificate number:
+    Build a short, human-readable, unique certificate number:
 
-        {SLUG}-{YEAR}-{ZERO_PADDED_SEQ}
+        {2-CHAR-SLUG}{YY}{MM}{DD}{2-DIGIT-SEQ}
 
-    Examples:
-        TECHACADEMY-2026-00001
-        TECHACADEMY-2026-00002
-        ISOGLOBAL-2026-00001
+    Total length: 12 characters (no separators), e.g.:
+        TA260408-01  →  'TA26040801'
+        IG260408-01  →  'IG26040801'
+
+    Format breakdown:
+        TA   = 2-char company slug
+        26   = 2-digit year
+        04   = 2-digit month
+        08   = 2-digit day
+        01   = 2-digit sequence (resets context is per issuer+day if needed)
     """
     from django.utils import timezone
-    slug = _slugify_business(issuer.business_name or issuer.full_name)
-    year = timezone.now().year
+    slug = _company_slug(issuer.business_name or issuer.full_name)
+    now = timezone.now()
+    date_str = now.strftime('%y%m%d')   # e.g. '260408'
     seq = _next_cert_sequence(issuer)
-    cert_no = f"{slug}-{year}-{seq:05d}"
+    cert_no = f"{slug}{date_str}{seq:02d}"   # e.g. 'TA26040801'
 
-    # Safety: if by any race condition this cert_no already exists, keep incrementing
+    # Safety: race-condition guard — increment seq until unique
     while Certificate.objects.filter(certificate_no=cert_no).exists():
         seq += 1
-        cert_no = f"{slug}-{year}-{seq:05d}"
+        cert_no = f"{slug}{date_str}{seq:02d}"
 
     return cert_no
 
 
 def generate_credential_id() -> str:
     """
-    Generate a backend-only opaque credential ID (UUID4, no hyphens, uppercase).
-    This is never shown to end users; it is used internally and in QR/deep links.
+    Generate a backend-only opaque credential ID (UUID4 hex, uppercase).
+    Never shown to end users; used internally.
     """
     return uuid.uuid4().hex.upper()
 
@@ -153,66 +160,45 @@ class Certificate(models.Model):
         ('Competence', 'Competence'),
         ('Attendance', 'Attendance'),
     )
-
     DELIVERY_MODES = (
         ('Online', 'Online'),
         ('Blended', 'Blended'),
         ('In-Person', 'In-Person'),
     )
-
     STATUS_CHOICES = (
         ('active', 'Active'),
         ('revoked', 'Revoked'),
     )
 
-    # User who issued the certificate
     issuer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='issued_certificates')
 
-    # ── Certificate Numbers ──────────────────────────────────────────────────
-    # certificate_no: human-readable, shown on the certificate and used for
-    #                 public verification (e.g. TECHACADEMY-2026-00001)
+    # certificate_no: human-readable, shown on certificate, used for public verification
     certificate_no = models.CharField(max_length=150, unique=True, blank=True)
 
-    # credential_id: opaque backend UUID — never shown to end users
+    # credential_id: backend-only opaque UUID — never shown to end users
     credential_id = models.CharField(max_length=64, unique=True, blank=True)
 
-    # Recipient Information
     recipient = models.CharField(max_length=255)
-
-    # Course/Program Information
     course = models.CharField(max_length=500)
     program = models.CharField(max_length=255, blank=True)
-
-    # Certificate Type
     certificate_type = models.CharField(max_length=20, choices=CERTIFICATE_TYPES, default='Completion')
     phrase = models.CharField(max_length=255, blank=True)
-
-    # Issue Information
     issue_date = models.DateField()
-
-    # Delivery and Additional Info
     delivery_mode = models.CharField(max_length=20, choices=DELIVERY_MODES, blank=True, null=True)
     competence_result = models.CharField(max_length=100, blank=True, null=True)
     competence_expiry_date = models.DateField(blank=True, null=True)
     hours_cpd = models.CharField(max_length=50, blank=True, null=True)
-
-    # Signatory Information
     signatory_name = models.CharField(max_length=255)
     signatory_title = models.CharField(max_length=255)
-
-    # Issuer Details (auto-filled from user profile)
     issuer_name = models.CharField(max_length=255)
     issuer_location = models.CharField(max_length=500)
 
-    # Verification
-    # The public verification link uses certificate_no, not credential_id
+    # verification_link uses certificate_no (public-facing)
     verification_link = models.URLField(max_length=500, blank=True)
+    # qr_code encodes the full frontend verification URL for this certificate
     qr_code = models.URLField(max_length=500, blank=True)
 
-    # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
-
-    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -231,34 +217,39 @@ class Certificate(models.Model):
 
     def generate_verification_link(self) -> str:
         """
-        Public verification URL uses the human-readable certificate_no so that
-        recipients can type it or share it easily.
+        Frontend verification URL — uses certificate_no so recipients can
+        type or share it easily.
+        e.g. https://credentialpath.io/verify/TA26040801/
         """
         return f"https://credentialpath.io/verify/{self.certificate_no}/"
 
     def generate_qr_code(self) -> str:
+        """
+        QR code encodes the full frontend verification URL for THIS certificate
+        so scanning the QR takes the verifier directly to the result page.
+        """
         link = self.verification_link or self.generate_verification_link()
         return f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={link}"
 
     def save(self, *args, **kwargs):
-        # ── Auto-generate certificate_no (only on creation) ──────────────────
+        # Auto-generate certificate_no on creation only
         if not self.certificate_no:
             self.certificate_no = generate_certificate_no(self.issuer)
 
-        # ── Auto-generate credential_id (only on creation) ───────────────────
+        # Auto-generate credential_id on creation only
         if not self.credential_id:
             cid = generate_credential_id()
             while Certificate.objects.filter(credential_id=cid).exists():
                 cid = generate_credential_id()
             self.credential_id = cid
 
-        # ── Verification link & QR ───────────────────────────────────────────
+        # Verification link and QR code
         if not self.verification_link:
             self.verification_link = self.generate_verification_link()
         if not self.qr_code:
             self.qr_code = self.generate_qr_code()
 
-        # ── Auto-set phrase from type ────────────────────────────────────────
+        # Auto-set phrase from type
         if not self.phrase:
             phrase_map = {
                 'Completion': 'has successfully completed',
@@ -278,7 +269,6 @@ class Notification(models.Model):
         ('certificate_updated', 'Certificate Updated'),
         ('bulk_upload', 'Bulk Upload'),
     )
-
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES)
     title = models.CharField(max_length=255)
@@ -300,16 +290,11 @@ class Badge(models.Model):
         ('active', 'Active'),
         ('revoked', 'Revoked'),
     )
-
     issuer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='issued_badges')
     certificate = models.OneToOneField(
-        Certificate,
-        on_delete=models.CASCADE,
-        related_name='badge',
-        null=True,
-        blank=True,
+        Certificate, on_delete=models.CASCADE,
+        related_name='badge', null=True, blank=True,
     )
-
     badge_no = models.CharField(max_length=150, unique=True)
     credential_id = models.CharField(max_length=64, unique=True)
     recipient = models.CharField(max_length=255)
@@ -321,7 +306,6 @@ class Badge(models.Model):
     badge_svg = models.TextField(blank=True)
     verification_link = models.URLField(max_length=500, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

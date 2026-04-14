@@ -6,6 +6,8 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
+from credentialapp.views import proxy_media
+
 schema_view = get_schema_view(
     openapi.Info(
         title="Certification Platform API",
@@ -20,6 +22,7 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/media/<path:path>', proxy_media, name='proxy_media'),
     path('api/', include('credentialapp.urls')),
 
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
