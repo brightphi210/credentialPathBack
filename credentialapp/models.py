@@ -53,7 +53,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     profile_image = models.ImageField(upload_to='profile_images/', null=True, blank=True)
-    company_bio = models.TextField(blank=True)
+    company_bio = models.TextField(blank=True, max_length=1000)
     company_address = models.CharField(max_length=500, blank=True)
     company_phone = models.CharField(max_length=20, blank=True)
     linkedin_handle = models.URLField(max_length=500, blank=True)
